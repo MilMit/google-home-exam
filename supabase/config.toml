@@ -1,0 +1,16 @@
+project_id = "lcherkxyrpmgkokkbhjs"
+
+[functions.start-exam]
+verify_jwt = true
+
+[functions.resume-exam]
+verify_jwt = true
+
+[functions.save-answer]
+verify_jwt = true
+
+[functions.submit-exam]
+verify_jwt = true
+
+[functions.log-event]
+verify_jwt = true

@@ -116,3 +116,8 @@ python3 -m http.server 8080
 ```
 
 Open `http://localhost:8080`. Demo questions are English-only, illustrative and are not part of the private production bank.
+
+
+## v3.4 Behavioral integrity monitoring
+
+The assessment now records server-assisted answer timing and question-view events, detects implausibly fast answering patterns, dense answer bursts, answers submitted without a recorded question view, background answers, excessive answer changes, rapid navigation, and unusually fast high-score completion. These signals trigger integrity review rather than being treated as conclusive proof of misconduct.

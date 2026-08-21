@@ -20,6 +20,8 @@ const state = {
   cameraReady: false,
   auditAttached: false,
   securityNotice: null,
+  lastViewedQuestionId: null,
+  questionViewPromise: null,
 }
 
 const tr = (fa,en)=>state.lang==='fa'?fa:en
@@ -91,7 +93,7 @@ const demoQuestions=[
 
 function clearExamRuntime(){
   clearInterval(state.timer)
-  state.attempt=null;state.questions=[];state.answers={};state.index=0;state.marked=new Set();state.result=null;state.demo=false
+  state.attempt=null;state.questions=[];state.answers={};state.index=0;state.marked=new Set();state.result=null;state.demo=false;state.lastViewedQuestionId=null;state.questionViewPromise=null
   detachAudit(); stopCamera(false); removeWatermark(); removeSecurityBanner()
   if(document.fullscreenElement) document.exitFullscreen().catch(()=>{})
 }
@@ -127,6 +129,7 @@ function rules(){
   <li>${tr('حد قبولی کل ۸۰٪ است؛ امنیت حداقل ۷۰٪ و شبکه و محصولات هرکدام حداقل ۶۰٪.','Overall pass mark is 80%; security requires 70%, and networking and products each require 60%.')}</li>
   <li>${tr('برای آزمون واقعی، دسترسی دوربین لازم است. تصویر فقط به‌صورت زنده روی دستگاه شما نمایش داده می‌شود و در این نسخه هیچ عکس یا ویدئویی ذخیره نمی‌شود.','Camera access is required for the real assessment. Your live image is shown only on your device; this version does not record or upload photos or video.')}</li>
   <li>${tr('خروج از تمام‌صفحه، تغییر تب، قطع دوربین، قطع شبکه و تلاش برای Copy/Paste ثبت می‌شود.','Fullscreen exits, tab changes, camera interruption, network interruption, and copy/paste attempts are logged.')}</li>
+  <li>${tr('زمان مشاهده سؤال، زمان ثبت پاسخ و الگوهای غیرعادی مانند پاسخ‌های بسیار سریع، پاسخ در زمانی که صفحه آزمون دیده نمی‌شود، جهش‌های شدید و تغییرات مکرر پاسخ برای بررسی یکپارچگی جلسه تحلیل می‌شوند. این سیگنال‌ها به‌تنهایی اثبات تخلف نیستند و می‌توانند باعث بررسی دستی شوند.','Question-view timing, answer-save timing, and unusual patterns such as extremely rapid answers, answers submitted while the assessment is not visible, dense answer bursts, or repeated answer changes are analyzed for session integrity. These signals do not by themselves prove misconduct and may trigger manual review.')}</li>
   <li>${tr('نتیجه بلافاصله بعد از ثبت نهایی نمایش داده می‌شود؛ پاسخ‌های صحیح نمایش داده نمی‌شوند.','The result is shown immediately after final submission; correct answers are not revealed.')}</li>
   </ul>
   <label class="option"><input type="checkbox" id="translateAssist"><span>${tr('ممکن است از ترجمه داخلی مرورگر استفاده کنم.','I may use built-in browser translation assistance.')}</span></label>
@@ -197,6 +200,8 @@ function startDemo(){state.demo=true;state.attempt={id:'demo',started_at:new Dat
 function loadAttempt(data){
   state.demo=false;state.attempt=data.attempt;state.questions=data.questions;state.answers=data.answers||{};state.index=0
   state.translationAssistance=Boolean(data.attempt?.translation_assistance)
+  state.lastViewedQuestionId=null
+  state.questionViewPromise=null
   ensureCameraDock();attachAudit();logAudit('camera_started');addWatermark();renderExam()
 }
 function current(){return state.questions[state.index]}
@@ -204,7 +209,20 @@ function selected(q){return (state.answers[q.id]||[]).map(Number)}
 async function setAnswer(q,id,checked){
   let a=selected(q);if(q.type==='multiple'){a=checked?[...new Set([...a,id])]:a.filter(x=>x!==id)}else a=[id]
   state.answers[q.id]=a;renderExam(false)
-  if(!state.demo)try{await functionCall('save-answer',{attempt_id:state.attempt.id,question_id:q.id,selected_option_ids:a})}catch(e){console.error(e)}
+  if(!state.demo)try{
+    // Keep the server event order deterministic: the question-view event should
+    // be committed before the answer-save event, even when the candidate answers quickly.
+    if(state.questionViewPromise) await state.questionViewPromise
+    await functionCall('save-answer',{attempt_id:state.attempt.id,question_id:q.id,selected_option_ids:a})
+  }catch(e){console.error(e)}
+}
+
+function trackQuestionView(q){
+  if(state.demo||!state.attempt?.id||!q?.id)return
+  const key=String(q.id)
+  if(state.lastViewedQuestionId===key)return
+  state.lastViewedQuestionId=key
+  state.questionViewPromise=logAudit('question_view',{question_id:Number(q.id),display_order:state.index+1})
 }
 
 function renderExam(resetTop=true){
@@ -212,6 +230,7 @@ function renderExam(resetTop=true){
   const q=current(),answered=Object.values(state.answers).filter(a=>a.length).length,total=state.questions.length,pct=Math.round(answered/total*100)
   app.innerHTML=`<section class="exam-layout"><article class="card question-card" lang="en" translate="yes"><div class="question-meta" translate="no"><span class="pill">${tr('سؤال','Question')} ${state.index+1}/${total}</span><span class="pill">${esc(q.domain)}</span><span class="pill">${q.type==='multiple'?tr('چندپاسخی','Multiple answer'):tr('تک‌پاسخی','Single answer')}</span>${state.translationAssistance?`<span class="pill translation-pill">${tr('ترجمه مرورگر مجاز','Browser translation allowed')}</span>`:''}</div><div class="question-text english-content" lang="en" translate="yes" dir="ltr">${esc(q.question)}</div><div id="options">${q.options.map(o=>{const is=selected(q).includes(Number(o.id));return `<label class="option ${is?'selected':''}"><input type="${q.type==='multiple'?'checkbox':'radio'}" name="q" data-id="${o.id}" ${is?'checked':''}><span class="english-content" lang="en" translate="yes" dir="ltr">${esc(o.text)}</span></label>`}).join('')}</div><div class="actions" translate="no"><button class="btn secondary" id="prev" ${state.index===0?'disabled':''}>${tr('قبلی','Previous')}</button><button class="btn" id="next">${state.index===total-1?tr('مرور و ثبت','Review and submit'):tr('بعدی','Next')}</button><button class="ghost" id="mark">${state.marked.has(q.id)?tr('حذف علامت','Unmark'):tr('علامت‌گذاری','Mark for review')}</button></div></article><aside class="card sidebar"><div>${tr('زمان باقی‌مانده','Time remaining')}</div><div class="timer" id="timer">--:--</div><div class="progress"><div style="width:${pct}%"></div></div><div>${tr('پاسخ داده‌شده','Answered')}: ${answered}/${total}</div><div class="qgrid">${state.questions.map((x,i)=>`<button class="qdot ${selected(x).length?'answered':''} ${i===state.index?'current':''} ${state.marked.has(x.id)?'marked':''}" data-index="${i}">${i+1}</button>`).join('')}</div></aside></section>`
   markQuestionForBrowserTranslation()
+  trackQuestionView(q)
   document.querySelectorAll('#options input').forEach(el=>el.onchange=()=>setAnswer(q,Number(el.dataset.id),el.checked))
   document.querySelector('#prev').onclick=()=>{if(state.index>0){state.index--;renderExam()}}
   document.querySelector('#next').onclick=()=>{if(state.index<total-1){state.index++;renderExam()}else reviewSubmit()}
@@ -342,7 +361,8 @@ function humanEvent(type){
   const labels={
     tab_hidden:'Tab hidden / switched',tab_visible:'Tab visible',window_blur:'Window focus lost',window_focus:'Window focus restored',
     network_offline:'Network offline',network_online:'Network restored',camera_started:'Camera started',camera_stopped:'Camera stopped',
-    fullscreen_enter:'Fullscreen entered',fullscreen_exit:'Fullscreen exited',copy_attempt:'Copy attempt',paste_attempt:'Paste attempt'
+    fullscreen_enter:'Fullscreen entered',fullscreen_exit:'Fullscreen exited',copy_attempt:'Copy attempt',paste_attempt:'Paste attempt',
+    question_view:'Question viewed',answer_saved:'Answer saved (server)' 
   }
   return labels[type]||String(type||'Event')
 }
@@ -350,6 +370,7 @@ function eventSeverity(type){
   if(['camera_stopped','tab_hidden','copy_attempt','paste_attempt'].includes(type))return 'high'
   if(type==='fullscreen_exit')return 'medium'
   if(type==='network_offline')return 'low'
+  if(type==='answer_saved'||type==='question_view')return 'info'
   return 'info'
 }
 function finalAttemptLabel(a){
@@ -359,7 +380,7 @@ function finalAttemptLabel(a){
 }
 function buildCandidateEmail(detail){
   const a=detail.attempt,r=detail.report||{},issues=r.integrity_issues||[],academic=r.academic_issues||[]
-  const issueLines=issues.length?issues.map(x=>`- ${x.label}: ${x.count}${x.key==='fullscreen_exit'&&x.grace?` (${x.grace} translation-related exit excluded from penalty)`:''}`).join('\n'):'- No penalized session-integrity events were detected.'
+  const issueLines=issues.length?issues.map(x=>`- ${x.label}: ${x.count}${x.key==='fullscreen_exit'&&x.grace?` (${x.grace} translation-related exit excluded from penalty)`:''}${x.detail?` — ${x.detail}`:''}`).join('\n'):'- No penalized session-integrity events were detected.'
   const academicLines=academic.length?academic.map(x=>`- ${String(x.label).replace(/_/g,' ')}: ${x.score}%${x.minimum!=null?` (required minimum ${x.minimum}%)`:' (below 80% review target)'}`).join('\n'):'- No academic section was flagged for additional review.'
   return `Dear Candidate,\n\nWe are contacting you regarding your recent Google Home Smart Appliances Assessment.\n\nSession summary:\n- Assessment score: ${a.percentage??'—'}%\n- Integrity score: ${a.integrity_score??'—'}%\n- Final status: ${a.final_status||finalAttemptLabel(a)}\n- Assessment duration: ${fmtDuration(r.duration_seconds)}\n- Questions answered: ${r.answered_count??0}/${r.question_count??60}\n- Browser translation declared: ${a.translation_assistance?'Yes':'No'}\n- Camera verified at start: ${a.camera_verified?'Yes':'No'}\n\nSession-integrity events requiring attention:\n${issueLines}\n\nAcademic areas requiring attention:\n${academicLines}\n\nPlease note that a recorded integrity event does not by itself establish misconduct. Browser behavior, connectivity, device permissions, or other technical issues can also create logged events. Where necessary, the session may be reviewed manually before a final administrative decision is confirmed.\n\nThe assessment rules require candidates to remain on the assessment page, keep the required camera session active, avoid unauthorized external tools, and follow the permitted browser-translation policy.\n\nIf you believe any recorded event resulted from a technical issue, please reply with a brief explanation.\n\nRegards,\nGoogle Home Smart Appliances Assessment Team`
 }
@@ -373,7 +394,7 @@ async function openAdminAttempt(adminId,attemptId){
 }
 function renderAdminAttempt(data,adminId){
   const a=data.attempt,r=data.report||{},events=r.timeline||[],issues=r.integrity_issues||[],academic=r.academic_issues||[]
-  const issueHtml=issues.length?issues.map(x=>`<div class="issue-row severity-${esc(x.severity)}"><div><b>${esc(x.label)}</b>${x.key==='fullscreen_exit'&&x.grace?`<small>${esc(x.grace)} exit(s) excluded under declared browser-translation grace</small>`:''}</div><span>${x.count}</span></div>`).join(''):`<div class="notice success">No penalized integrity events detected.</div>`
+  const issueHtml=issues.length?issues.map(x=>`<div class="issue-row severity-${esc(x.severity)}"><div><b>${esc(x.label)}</b>${x.key==='fullscreen_exit'&&x.grace?`<small>${esc(x.grace)} exit(s) excluded under declared browser-translation grace</small>`:''}${x.detail?`<small>${esc(x.detail)}</small>`:''}</div><span>${x.count}</span></div>`).join(''):`<div class="notice success">No penalized integrity events detected.</div>`
   const academicHtml=academic.length?academic.map(x=>`<div class="issue-row ${x.severity==='required'?'severity-high':'severity-low'}"><div><b>${esc(String(x.label).replace(/_/g,' '))}</b><small>${x.minimum!=null?`Required minimum: ${x.minimum}%`:'Below 80% review target'}</small></div><span>${x.score}%</span></div>`).join(''):`<div class="notice success">No academic section flagged for additional review.</div>`
   const timelineHtml=events.length?events.map(e=>`<div class="timeline-item severity-${eventSeverity(e.event_type)}"><div class="timeline-dot"></div><div class="timeline-body"><div class="timeline-top"><b>${esc(humanEvent(e.event_type))}</b><time>${esc(fmtDate(e.created_at))}</time></div>${e.event_data&&Object.keys(e.event_data).length?`<details><summary>Event data</summary><pre>${esc(JSON.stringify(e.event_data,null,2))}</pre></details>`:''}</div></div>`).join(''):`<p class="muted">No session events were recorded.</p>`
   const sections=Object.entries(a.section_scores||{}).map(([k,v])=>`<div class="bar-row"><span>${esc(k)}</span><div class="bar"><i style="width:${Math.max(0,Math.min(100,Number(v)||0))}%"></i></div><b>${v}%</b></div>`).join('')
@@ -382,6 +403,7 @@ function renderAdminAttempt(data,adminId){
   <div class="grid grid-4 admin-metrics"><div class="card stat"><strong>${a.percentage??'—'}%</strong><span>Academic score</span></div><div class="card stat"><strong>${a.integrity_score??'—'}%</strong><span>Integrity score</span></div><div class="card stat"><strong>${r.answered_count??0}/${r.question_count??60}</strong><span>Answered</span></div><div class="card stat"><strong>${fmtDuration(r.duration_seconds)}</strong><span>Duration</span></div></div>
   <div class="admin-report-grid"><div class="card"><h2>Session details</h2><dl class="report-dl"><div><dt>Started</dt><dd>${esc(fmtDate(a.started_at))}</dd></div><div><dt>Submitted</dt><dd>${esc(fmtDate(a.submitted_at))}</dd></div><div><dt>Camera verified</dt><dd>${a.camera_verified?'Yes':'No'}</dd></div><div><dt>Browser translation</dt><dd>${a.translation_assistance?'Declared / allowed':'Not declared'}</dd></div><div><dt>Integrity status</dt><dd>${esc(a.integrity_status||'—')}</dd></div><div><dt>Final status</dt><dd>${esc(a.final_status||finalAttemptLabel(a))}</dd></div></dl></div>
   <div class="card"><h2>Integrity issues</h2><div class="issue-list">${issueHtml}</div></div></div>
+  <div class="card" style="margin-top:20px"><div class="admin-head"><div><h2>Response-behavior analysis</h2><p class="muted">Server-assisted timing and navigation signals. These are review indicators, not proof of misconduct.</p></div><div class="pill">Behavior penalty: ${r.behavior_penalty??0}</div></div><dl class="report-dl"><div><dt>Median first-answer time</dt><dd>${r.behavior?.median_first_answer_seconds!=null?`${r.behavior.median_first_answer_seconds}s`:'—'}</dd></div><div><dt>Very-fast first answers</dt><dd>${r.behavior?.rapid_first_answers??0}</dd></div><div><dt>Answers without recorded view</dt><dd>${r.behavior?.answer_without_view??0}</dd></div><div><dt>Background answers</dt><dd>${r.behavior?.background_answers??0}</dd></div><div><dt>Answer soon after tab return</dt><dd>${r.behavior?.answer_after_tab_return??0}</dd></div><div><dt>Answer soon after window focus</dt><dd>${r.behavior?.answer_after_window_focus??0}</dd></div><div><dt>Repeated-change questions</dt><dd>${r.behavior?.repeated_change_questions??0}</dd></div><div><dt>Max first answers / 30s</dt><dd>${r.behavior?.max_first_answers_30s??0}</dd></div><div><dt>Max question views / 15s</dt><dd>${r.behavior?.max_question_views_15s??0}</dd></div><div><dt>High-score fast completion</dt><dd>${r.behavior?.fast_high_score?'Flagged':'No'}</dd></div></dl></div>
   <div class="admin-report-grid"><div class="card"><h2>Academic areas</h2><div class="result-sections">${sections||'<p class="muted">Section scores are not available yet.</p>'}</div><h3>Areas needing attention</h3><div class="issue-list">${academicHtml}</div></div><div class="card"><h2>Candidate email</h2><p class="muted">Generated from the actual session report. Review it before sending.</p><textarea id="reportEmailText" class="report-email" spellcheck="false">${esc(emailText)}</textarea><div class="actions"><button class="btn" id="copyReportEmail">Copy email</button><a class="ghost mail-link" id="openMailClient" href="#">Open email app</a><span id="copyReportStatus" class="muted"></span></div></div></div>
   <div class="card" style="margin-top:20px"><div class="admin-head"><div><h2>Security timeline</h2><p class="muted">Chronological browser and camera events recorded during this attempt.</p></div><div class="pill">${events.length} events</div></div><div class="timeline">${timelineHtml}</div></div></section>`
   document.querySelector('#backAdmin').onclick=async()=>{try{renderAdmin(await functionCall('admin-dashboard',{admin_id:adminId}))}catch(e){adminPage(e.message)}}
@@ -390,7 +412,7 @@ function renderAdminAttempt(data,adminId){
   const mail=document.querySelector('#openMailClient');mail.href=`mailto:${encodeURIComponent(a.email||'')}?subject=${encodeURIComponent('Assessment Session Review')}&body=${encodeURIComponent(emailText)}`
 }
 async function renderAdmin(data){
-  const rows=(data.recent_attempts||[]).map(a=>{const s=a.security_summary||{};const issues=(Number(s.tab_hidden||0)+Number(s.camera_stopped||0)+Number(s.fullscreen_penalized||0)+Number(s.copy_attempt||0)+Number(s.paste_attempt||0));return `<tr><td>${esc(a.email||a.user_id)}</td><td>${fmtDate(a.started_at)}</td><td>${a.percentage!=null?`${a.percentage}%`:'—'}</td><td>${a.integrity_score!=null?`${a.integrity_score}%`:'—'}</td><td>${issues||0}</td><td>${a.translation_assistance?'Yes':'No'}</td><td>${esc(finalAttemptLabel(a))}</td><td><button class="ghost admin-view-report" data-attempt="${esc(a.id)}">View report</button></td></tr>`}).join('')
+  const rows=(data.recent_attempts||[]).map(a=>{const s=a.security_summary||{};const issues=(Number(s.tab_hidden||0)+Number(s.camera_stopped||0)+Number(s.fullscreen_penalized||0)+Number(s.copy_attempt||0)+Number(s.paste_attempt||0)+Number(s.behavior?.flag_count||0));return `<tr><td>${esc(a.email||a.user_id)}</td><td>${fmtDate(a.started_at)}</td><td>${a.percentage!=null?`${a.percentage}%`:'—'}</td><td>${a.integrity_score!=null?`${a.integrity_score}%`:'—'}</td><td>${issues||0}</td><td>${a.translation_assistance?'Yes':'No'}</td><td>${esc(finalAttemptLabel(a))}</td><td><button class="ghost admin-view-report" data-attempt="${esc(a.id)}">View report</button></td></tr>`}).join('')
   app.innerHTML=`<section><div class="admin-head"><div><div class="pill">${esc(data.admin.admin_id)}</div><h1>${tr('پنل مدیریت آزمون','Assessment admin panel')}</h1></div><button class="ghost" id="adminRefresh">${tr('به‌روزرسانی','Refresh')}</button></div><div class="grid grid-4"><div class="card stat"><strong>${data.metrics.active_questions}</strong><span>Active questions</span></div><div class="card stat"><strong>${data.metrics.submitted_attempts}</strong><span>Submitted attempts</span></div><div class="card stat"><strong>${data.metrics.pending_review}</strong><span>Pending review</span></div><div class="card stat"><strong>${data.metrics.active_attempts??0}</strong><span>Active now</span></div></div><div class="card" style="margin-top:20px"><div class="admin-head"><div><h2>${tr('آخرین نتایج','Recent results')}</h2><p class="muted">Open any attempt to see the security timeline, problem areas, and a ready-to-send candidate email.</p></div></div><div class="table-wrap"><table class="admin-table"><thead><tr><th>User</th><th>Started</th><th>Score</th><th>Integrity</th><th>Flagged</th><th>Translation</th><th>Status</th><th>Report</th></tr></thead><tbody>${rows||`<tr><td colspan="8">No attempts yet.</td></tr>`}</tbody></table></div></div></section>`
   document.querySelector('#adminRefresh').onclick=async()=>{try{renderAdmin(await functionCall('admin-dashboard',{admin_id:data.admin.admin_id}))}catch(e){adminPage(e.message)}}
   document.querySelectorAll('.admin-view-report').forEach(btn=>btn.onclick=()=>openAdminAttempt(data.admin.admin_id,btn.dataset.attempt))

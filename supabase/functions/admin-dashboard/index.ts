@@ -1,4 +1,5 @@
 import { authenticatedUser, handleOptions, json } from '../_shared/common.ts'
+import { analyzeBehavior } from '../_shared/behavior.ts'
 
 const requiredSections: Record<string, number> = { security: 70, network: 60, products: 60 }
 
@@ -76,6 +77,7 @@ Deno.serve(async (req) => {
       const rawFullscreen = Number(summary.fullscreen_exit ?? counts.fullscreen_exit ?? 0)
       const penalizedFullscreen = Number(summary.fullscreen_penalized ?? Math.max(0, rawFullscreen - translationGrace))
 
+      const behavior = analyzeBehavior(ev, attempt, Number(attempt.percentage ?? 0))
       const integrityIssues = [
         { key: 'camera_stopped', label: 'Camera interruption', count: Number(counts.camera_stopped ?? 0), severity: 'high', penalized: true },
         { key: 'tab_hidden', label: 'Assessment tab hidden / switched', count: Number(counts.tab_hidden ?? 0), severity: 'high', penalized: true },
@@ -84,7 +86,8 @@ Deno.serve(async (req) => {
         { key: 'paste_attempt', label: 'Paste attempt', count: Number(counts.paste_attempt ?? 0), severity: 'high', penalized: true },
         { key: 'network_offline', label: 'Network interruption', count: Number(counts.network_offline ?? 0), severity: 'low', penalized: true },
         { key: 'window_blur', label: 'Window focus lost', count: Number(counts.window_blur ?? 0), severity: 'info', penalized: false },
-      ].filter(x => x.count > 0)
+        ...behavior.issues,
+      ].filter(x => Number(x.count ?? 0) > 0)
 
       const endTime = attempt.submitted_at ?? (attempt.status === 'active' ? new Date().toISOString() : attempt.expires_at)
       const finalStatus = attempt.status === 'submitted'
@@ -101,6 +104,9 @@ Deno.serve(async (req) => {
           event_counts: counts,
           integrity_issues: integrityIssues,
           academic_issues: academicIssues(attempt),
+          behavior: behavior.summary,
+          behavior_penalty: behavior.penalty,
+          behavior_critical: behavior.critical,
           timeline: ev,
         },
       })

@@ -26,9 +26,26 @@ const tr = (fa,en)=>state.lang==='fa'?fa:en
 const esc = s=>String(s??'').replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[m]||m))
 
 function direction(){
-  document.documentElement.lang=state.lang
+  // The assessment source language is English even when the surrounding UI is Persian.
+  // Declaring the document as English during an active question helps Chrome/Edge
+  // detect and translate dynamically-rendered question content.
+  const examContentActive = state.questions.length > 0
+  document.documentElement.lang = examContentActive ? 'en' : state.lang
   document.documentElement.dir=state.lang==='fa'?'rtl':'ltr'
   langBtn.textContent=state.lang==='fa'?'EN':'فا'
+}
+
+function markQuestionForBrowserTranslation(){
+  document.documentElement.lang='en'
+  document.querySelectorAll('.english-content').forEach(el=>{
+    el.setAttribute('lang','en')
+    el.setAttribute('translate','yes')
+  })
+  const card=document.querySelector('.question-card')
+  if(card){
+    card.setAttribute('lang','en')
+    card.setAttribute('translate','yes')
+  }
 }
 function saveSession(s){
   state.session=s
@@ -193,7 +210,8 @@ async function setAnswer(q,id,checked){
 function renderExam(resetTop=true){
   clearInterval(state.timer)
   const q=current(),answered=Object.values(state.answers).filter(a=>a.length).length,total=state.questions.length,pct=Math.round(answered/total*100)
-  app.innerHTML=`<section class="exam-layout"><article class="card question-card"><div class="question-meta"><span class="pill">${tr('سؤال','Question')} ${state.index+1}/${total}</span><span class="pill">${esc(q.domain)}</span><span class="pill">${q.type==='multiple'?tr('چندپاسخی','Multiple answer'):tr('تک‌پاسخی','Single answer')}</span>${state.translationAssistance?`<span class="pill translation-pill">${tr('ترجمه مرورگر مجاز','Browser translation allowed')}</span>`:''}</div><div class="question-text english-content" dir="ltr">${esc(q.question)}</div><div id="options">${q.options.map(o=>{const is=selected(q).includes(Number(o.id));return `<label class="option ${is?'selected':''}"><input type="${q.type==='multiple'?'checkbox':'radio'}" name="q" data-id="${o.id}" ${is?'checked':''}><span class="english-content" dir="ltr">${esc(o.text)}</span></label>`}).join('')}</div><div class="actions"><button class="btn secondary" id="prev" ${state.index===0?'disabled':''}>${tr('قبلی','Previous')}</button><button class="btn" id="next">${state.index===total-1?tr('مرور و ثبت','Review and submit'):tr('بعدی','Next')}</button><button class="ghost" id="mark">${state.marked.has(q.id)?tr('حذف علامت','Unmark'):tr('علامت‌گذاری','Mark for review')}</button></div></article><aside class="card sidebar"><div>${tr('زمان باقی‌مانده','Time remaining')}</div><div class="timer" id="timer">--:--</div><div class="progress"><div style="width:${pct}%"></div></div><div>${tr('پاسخ داده‌شده','Answered')}: ${answered}/${total}</div><div class="qgrid">${state.questions.map((x,i)=>`<button class="qdot ${selected(x).length?'answered':''} ${i===state.index?'current':''} ${state.marked.has(x.id)?'marked':''}" data-index="${i}">${i+1}</button>`).join('')}</div></aside></section>`
+  app.innerHTML=`<section class="exam-layout"><article class="card question-card" lang="en" translate="yes"><div class="question-meta" translate="no"><span class="pill">${tr('سؤال','Question')} ${state.index+1}/${total}</span><span class="pill">${esc(q.domain)}</span><span class="pill">${q.type==='multiple'?tr('چندپاسخی','Multiple answer'):tr('تک‌پاسخی','Single answer')}</span>${state.translationAssistance?`<span class="pill translation-pill">${tr('ترجمه مرورگر مجاز','Browser translation allowed')}</span>`:''}</div><div class="question-text english-content" lang="en" translate="yes" dir="ltr">${esc(q.question)}</div><div id="options">${q.options.map(o=>{const is=selected(q).includes(Number(o.id));return `<label class="option ${is?'selected':''}"><input type="${q.type==='multiple'?'checkbox':'radio'}" name="q" data-id="${o.id}" ${is?'checked':''}><span class="english-content" lang="en" translate="yes" dir="ltr">${esc(o.text)}</span></label>`}).join('')}</div><div class="actions" translate="no"><button class="btn secondary" id="prev" ${state.index===0?'disabled':''}>${tr('قبلی','Previous')}</button><button class="btn" id="next">${state.index===total-1?tr('مرور و ثبت','Review and submit'):tr('بعدی','Next')}</button><button class="ghost" id="mark">${state.marked.has(q.id)?tr('حذف علامت','Unmark'):tr('علامت‌گذاری','Mark for review')}</button></div></article><aside class="card sidebar"><div>${tr('زمان باقی‌مانده','Time remaining')}</div><div class="timer" id="timer">--:--</div><div class="progress"><div style="width:${pct}%"></div></div><div>${tr('پاسخ داده‌شده','Answered')}: ${answered}/${total}</div><div class="qgrid">${state.questions.map((x,i)=>`<button class="qdot ${selected(x).length?'answered':''} ${i===state.index?'current':''} ${state.marked.has(x.id)?'marked':''}" data-index="${i}">${i+1}</button>`).join('')}</div></aside></section>`
+  markQuestionForBrowserTranslation()
   document.querySelectorAll('#options input').forEach(el=>el.onchange=()=>setAnswer(q,Number(el.dataset.id),el.checked))
   document.querySelector('#prev').onclick=()=>{if(state.index>0){state.index--;renderExam()}}
   document.querySelector('#next').onclick=()=>{if(state.index<total-1){state.index++;renderExam()}else reviewSubmit()}

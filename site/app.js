@@ -228,9 +228,46 @@ function resultDecision(r){
 function renderResult(){
   const r=state.result,p=Number(r.percentage||0),decision=resultDecision(r)
   const started=new Date(r.started_at||state.attempt?.started_at||Date.now()),ended=new Date(r.submitted_at||Date.now()),mins=Math.max(0,Math.round((ended-started)/60000))
-  app.innerHTML=`<section class="card"><div class="pill">${tr('نتیجه نهایی','Final result')}</div><div class="result-score ${decision.cls}">${p}%</div><h1>${decision.label}</h1><p class="lead">${decision.text}</p><div class="result-summary"><div><span>${tr('زمان مصرف‌شده','Time used')}</span><b>${mins} ${tr('دقیقه','min')}</b></div><div><span>${tr('امتیاز یکپارچگی','Integrity score')}</span><b>${Number(r.integrity_score??100)}%</b></div><div><span>${tr('ترجمه مرورگر','Browser translation')}</span><b>${r.translation_assistance?tr('اعلام و مجاز','Declared / allowed'):tr('استفاده نشده','Not declared')}</b></div></div>${Object.entries(r.section_scores||{}).map(([k,v])=>`<div class="bar-row"><span>${esc(k)}</span><div class="bar"><i style="width:${v}%"></i></div><b>${v}%</b></div>`).join('')}<div class="notice">${tr('پاسخ‌های صحیح و کلید سؤال‌ها بعد از آزمون نمایش داده نمی‌شوند.','Correct answers and answer keys are not displayed after the assessment.')}</div><div class="actions"><button class="btn" id="home">${tr('بازگشت به خانه','Return home')}</button></div></section>`
+  const icon=decision.cls==='pass'?'✓':decision.cls==='review'?'!':'×'
+  app.innerHTML=`<section class="card result-card ${decision.cls}" id="resultCard"><div id="celebrationLayer" class="celebration-layer" aria-hidden="true"></div><div class="result-hero"><div class="result-icon ${decision.cls}" aria-hidden="true">${icon}</div><div><div class="pill">${tr('نتیجه نهایی','Final result')}</div><div class="result-score ${decision.cls}" id="animatedScore" data-target="${p}">0%</div><h1 class="result-title">${decision.label}</h1><p class="lead">${decision.text}</p></div></div><div class="result-summary"><div><span>${tr('زمان مصرف‌شده','Time used')}</span><b>${mins} ${tr('دقیقه','min')}</b></div><div><span>${tr('امتیاز یکپارچگی','Integrity score')}</span><b>${Number(r.integrity_score??100)}%</b></div><div><span>${tr('ترجمه مرورگر','Browser translation')}</span><b>${r.translation_assistance?tr('اعلام و مجاز','Declared / allowed'):tr('استفاده نشده','Not declared')}</b></div></div><div class="result-sections">${Object.entries(r.section_scores||{}).map(([k,v])=>`<div class="bar-row"><span>${esc(k)}</span><div class="bar"><i data-width="${Number(v)||0}" style="width:0%"></i></div><b>${v}%</b></div>`).join('')}</div><div class="notice">${tr('پاسخ‌های صحیح و کلید سؤال‌ها بعد از آزمون نمایش داده نمی‌شوند.','Correct answers and answer keys are not displayed after the assessment.')}</div><div class="actions"><button class="btn" id="home">${tr('بازگشت به خانه','Return home')}</button></div></section>`
   stopCamera(false);detachAudit();removeWatermark();removeSecurityBanner();if(document.fullscreenElement)document.exitFullscreen().catch(()=>{})
+  animateResult(decision,p)
   document.querySelector('#home').onclick=()=>{clearExamRuntime();home()}
+}
+function animateResult(decision,score){
+  const reduced=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  const scoreEl=document.querySelector('#animatedScore')
+  const bars=[...document.querySelectorAll('.result-sections .bar i')]
+  if(reduced){if(scoreEl)scoreEl.textContent=`${score}%`;bars.forEach(b=>b.style.width=`${b.dataset.width}%`);return}
+  if(scoreEl){
+    const start=performance.now(),duration=1100
+    const tick=now=>{const t=Math.min(1,(now-start)/duration),ease=1-Math.pow(1-t,3);scoreEl.textContent=`${Math.round(score*ease)}%`;if(t<1)requestAnimationFrame(tick)}
+    requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(()=>bars.forEach((b,i)=>setTimeout(()=>{b.style.width=`${b.dataset.width}%`},220+i*85)))
+  const card=document.querySelector('#resultCard');if(card)card.classList.add('result-enter')
+  if(decision.cls==='pass')launchConfetti()
+  else if(decision.cls==='review')setTimeout(()=>card?.classList.add('review-pulse'),180)
+  else setTimeout(()=>card?.classList.add('fail-settle'),180)
+}
+function launchConfetti(){
+  const layer=document.querySelector('#celebrationLayer');if(!layer)return
+  const palette=['#4285f4','#34a853','#fbbc05','#ea4335','#8ab4f8','#81c995']
+  const count=84
+  for(let i=0;i<count;i++){
+    const piece=document.createElement('i')
+    piece.className='confetti-piece'
+    piece.style.setProperty('--x',`${Math.random()*100}%`)
+    piece.style.setProperty('--dx',`${(Math.random()-.5)*260}px`)
+    piece.style.setProperty('--rot',`${Math.random()*900-450}deg`)
+    piece.style.setProperty('--delay',`${Math.random()*.55}s`)
+    piece.style.setProperty('--dur',`${2.4+Math.random()*1.8}s`)
+    piece.style.setProperty('--c',palette[Math.floor(Math.random()*palette.length)])
+    piece.style.setProperty('--w',`${6+Math.random()*7}px`)
+    piece.style.setProperty('--h',`${9+Math.random()*10}px`)
+    layer.appendChild(piece)
+  }
+  setTimeout(()=>layer.replaceChildren(),5200)
 }
 
 async function logAudit(type,data={}){

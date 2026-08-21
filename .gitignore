@@ -4,3 +4,4 @@ private-bank/
 question-bank.json
 **/service-role*
 .DS_Store
+supabase/.temp/

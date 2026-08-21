@@ -7,7 +7,7 @@ A server-graded assessment with a bilingual Persian/English interface and Englis
 - Static frontend suitable for GitHub Pages
 - 60 questions per attempt, 75-minute server timer
 - One random variant from each of 60 learning objectives
-- Private 240-question English-only bank supplied separately
+- Private 300-question English-only bank supplied separately
 - Email/password authentication through Supabase Auth
 - Server-side question delivery, answer saving, scoring, section thresholds, and cooldown
 - Tab/focus/network event logging

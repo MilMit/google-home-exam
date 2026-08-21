@@ -1,8 +1,6 @@
-node_modules/
 .env
 .env.*
-!.env.example
-.supabase/
-dist/
+private-bank/
+question-bank.json
+**/service-role*
 .DS_Store
-*.log

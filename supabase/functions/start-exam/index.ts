@@ -13,7 +13,7 @@ const DOMAIN_DIFFICULTY:Record<string,{medium:number,hard:number,very_hard:numbe
 Deno.serve(async(req)=>{
  const preflight=handleOptions(req); if(preflight)return preflight
  try{
-  const {user,admin}=await authenticatedUser(req); const now=new Date()
+  const {user,admin}=await authenticatedUser(req); const body=await req.json().catch(()=>({})); const translationAssistance=Boolean(body.translation_assistance); const cameraVerified=Boolean(body.camera_verified); const now=new Date()
   const {data:active}=await admin.from('exam_attempts').select('*').eq('user_id',user.id).eq('status','active').maybeSingle()
   if(active){if(new Date(active.expires_at)>now)return json({code:'ACTIVE_ATTEMPT',attempt_id:active.id},409);await admin.from('exam_attempts').update({status:'expired',submitted_at:now.toISOString(),updated_at:now.toISOString()}).eq('id',active.id)}
   const since=new Date(now.getTime()-COOLDOWN_HOURS*3600_000).toISOString()
@@ -48,7 +48,8 @@ Deno.serve(async(req)=>{
   const counts=finalSelected.reduce((a:any,q:any)=>{a[q.difficulty]=(a[q.difficulty]||0)+1;return a},{})
   if(counts.medium!==9||counts.hard!==33||counts.very_hard!==18)throw new Error(`Difficulty quota mismatch: ${JSON.stringify(counts)}`)
   const expiresAt=new Date(now.getTime()+EXAM_MINUTES*60_000)
-  const {data:attempt,error:aErr}=await admin.from('exam_attempts').insert({user_id:user.id,started_at:now.toISOString(),expires_at:expiresAt.toISOString(),status:'active'}).select('*').single();if(aErr)throw aErr
+  if(!cameraVerified) return json({code:'CAMERA_REQUIRED',error:'Camera verification is required before the assessment starts.'},400)
+  const {data:attempt,error:aErr}=await admin.from('exam_attempts').insert({user_id:user.id,started_at:now.toISOString(),expires_at:expiresAt.toISOString(),status:'active',translation_assistance:translationAssistance,camera_verified:cameraVerified}).select('*').single();if(aErr)throw aErr
   const ids=finalSelected.map(q=>q.id)
   const {data:opts,error:oErr}=await admin.from('question_options').select('id,question_id,option_text').in('question_id',ids);if(oErr)throw oErr
   const optsByQ=new Map<number,any[]>();for(const o of opts??[]){const l=optsByQ.get(o.question_id)??[];l.push(o);optsByQ.set(o.question_id,l)}
